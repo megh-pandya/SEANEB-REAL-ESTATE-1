@@ -1,6 +1,7 @@
 // src/main/client.js
 import axios from "axios";
 import { API_BASE_URL } from "@/lib/core/apiBaseUrl";
+import { getAuthAppUrl } from "@/lib/core/appUrls";
 import {
   getAccessToken,
   clearAccessToken,
@@ -118,9 +119,14 @@ api.interceptors.response.use(
       } catch {
         clearAccessToken();
       }
-      // Redirect to login if needed
+
       if (typeof window !== "undefined") {
-        window.location.href = "/auth/login";
+        const loginUrl = new URL(getAuthAppUrl("/auth/login"), window.location.origin);
+        const returnTo = String(window.location.href || "").trim();
+        if (returnTo) {
+          loginUrl.searchParams.set("returnTo", returnTo);
+        }
+        window.location.assign(loginUrl.toString());
       }
       return Promise.reject(error);
     }

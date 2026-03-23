@@ -365,6 +365,19 @@ const normalizeLocation = (item, type) => {
   };
 };
 
+const FALLBACK_COUNTRY_ROWS = [
+  {
+    country_name: "India",
+    country_slug: "in",
+    code: "IN",
+    iso2: "IN",
+    iso_code: "IN",
+  },
+];
+
+const getFallbackCountries = () =>
+  FALLBACK_COUNTRY_ROWS.map((item) => normalizeLocation(item, "country"));
+
 const fetchLocationPath = async (path) => {
   const cached = getCachedData(path);
   if (cached) return cached;
@@ -446,8 +459,21 @@ const requestLocationRaw = async (pathFactory) => {
 };
 
 export const getCountries = async () => {
-  const result = await requestLocation((productKey) => `/location/${productKey}/countries`);
-  return result.data.map((item) => normalizeLocation(item, "country"));
+  try {
+    const result = await requestLocation((productKey) => `/location/${productKey}/countries`);
+    const countries = result.data.map((item) => normalizeLocation(item, "country"));
+    return countries.length > 0 ? countries : getFallbackCountries();
+  } catch (error) {
+    console.warn("[location] getCountries fallback engaged", {
+      status: Number(error?.response?.status || 0),
+      message:
+        error?.response?.data?.error?.message ||
+        error?.response?.data?.message ||
+        error?.message ||
+        "Unknown location error",
+    });
+    return getFallbackCountries();
+  }
 };
 
 export const getStates = async (countrySlug) => {

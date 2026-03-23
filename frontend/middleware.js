@@ -126,6 +126,16 @@ const getRequestProtocol = (request) => {
   return String(request?.nextUrl?.protocol || "").replace(":", "").trim().toLowerCase();
 };
 
+const getRequestHost = (request) => {
+  const forwardedHost = String(request?.headers?.get("x-forwarded-host") || "").trim();
+  if (forwardedHost) return forwardedHost.split(",")[0].trim();
+
+  const hostHeader = String(request?.headers?.get("host") || "").trim();
+  if (hostHeader) return hostHeader;
+
+  return String(request?.nextUrl?.host || request?.nextUrl?.hostname || "").trim();
+};
+
 const normalizeHost = (host) => String(host || "").trim().replace(/:\d+$/, "").toLowerCase();
 
 const isLoopbackOrIp = (host) => {
@@ -138,17 +148,37 @@ const isLoopbackOrIp = (host) => {
 
 const normalizeBaseUrl = (value) => String(value || "").trim().replace(/\/+$/, "");
 
+const getExternalRequestOrigin = (request) => {
+  const protocol = getRequestProtocol(request) || "http";
+  const host = getRequestHost(request);
+  if (!host) return String(request?.nextUrl?.origin || "").trim();
+  return `${protocol}://${host}`;
+};
+
+const getExternalRequestUrl = (request) => {
+  const origin = getExternalRequestOrigin(request);
+  try {
+    return new URL(
+      `${request?.nextUrl?.pathname || "/"}${request?.nextUrl?.search || ""}`,
+      origin || request?.url || "http://localhost"
+    ).toString();
+  } catch {
+    return String(request?.url || "").trim();
+  }
+};
+
 const resolveCrossAppBaseUrl = (rawUrl, request) => {
   const normalized = normalizeBaseUrl(rawUrl);
   if (!normalized) return "";
 
   try {
     const targetUrl = new URL(normalized);
-    const requestHost = normalizeHost(request?.nextUrl?.hostname || request?.headers?.get("host") || "");
+    const requestHost = normalizeHost(getRequestHost(request));
     const targetHost = normalizeHost(targetUrl.hostname);
 
     if (requestHost && requestHost !== targetHost && isLoopbackOrIp(targetHost)) {
-      targetUrl.protocol = request?.nextUrl?.protocol || targetUrl.protocol;
+      const requestProtocol = getRequestProtocol(request);
+      if (requestProtocol) targetUrl.protocol = `${requestProtocol}:`;
       targetUrl.hostname = requestHost;
     }
 
@@ -297,14 +327,15 @@ const tryRefreshSession = async (request) => {
 
 const redirectToAuthLogin = (request) => {
   const authLoginTarget = buildCrossAppUrl(process.env.NEXT_PUBLIC_APP_URL, request, "/auth/login");
+  const returnTo = getExternalRequestUrl(request);
   if (!authLoginTarget) {
     const fallbackLoginUrl = new URL("/auth/login", request.url);
-    fallbackLoginUrl.searchParams.set("returnTo", request.nextUrl.href);
+    fallbackLoginUrl.searchParams.set("returnTo", returnTo);
     return NextResponse.redirect(fallbackLoginUrl, { status: 307 });
   }
 
   const loginUrl = new URL(authLoginTarget);
-  loginUrl.searchParams.set("returnTo", request.nextUrl.href);
+  loginUrl.searchParams.set("returnTo", returnTo);
   return NextResponse.redirect(loginUrl, { status: 307 });
 };
 
@@ -364,7 +395,7 @@ export async function middleware(request) {
     );
     if (registerTarget) {
       const registerUrl = new URL(registerTarget);
-      registerUrl.searchParams.set("returnTo", request.nextUrl.href);
+      registerUrl.searchParams.set("returnTo", getExternalRequestUrl(request));
       response = NextResponse.redirect(registerUrl, { status: 307 });
     } else {
       const localRegisterUrl = new URL("/home", request.url);

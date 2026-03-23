@@ -7,6 +7,7 @@ import BrandLogo from "./BrandLogo";
 import TermsConditionsModal from "./TermsConditionsModal";
 import { useAuthState } from "@/hooks/useAuthState";
 import { openAuthLoginTab } from "@/lib/crossAppTabNavigation";
+import { getAuthAppUrl } from "@/lib/core/appUrls";
 import { guardDashboardNavigation } from "@/services/auth.service";
 
 const TERMS_TEXT_PATH = "/legal/terms-conditions-property.txt";
@@ -107,7 +108,7 @@ export default function GlobalFooter() {
     event.preventDefault();
     void guardDashboardNavigation({
       onAuthenticated: () => {
-        window.location.assign("/dashboard");
+        window.location.assign(getAuthAppUrl("/dashboard"));
       },
       onUnauthenticated: () => {
         openAuthLoginTab();
