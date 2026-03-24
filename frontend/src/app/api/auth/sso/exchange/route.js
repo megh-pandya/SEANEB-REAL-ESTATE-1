@@ -139,6 +139,71 @@ const readExpiresInFromPayload = (payload = {}) => {
   return Number.isFinite(num) ? num : null;
 };
 
+const parseSetCookieAttributes = (cookieLine = "") => {
+  const parts = String(cookieLine || "")
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const attrs = { maxAge: null, expires: null };
+  for (const attr of parts.slice(1)) {
+    const [rawKey, ...rest] = attr.split("=");
+    const key = String(rawKey || "").trim().toLowerCase();
+    const value = rest.join("=").trim();
+    if (key === "max-age") {
+      const num = Number(value);
+      if (Number.isFinite(num)) attrs.maxAge = num;
+    } else if (key === "expires") {
+      const date = new Date(value);
+      if (!Number.isNaN(date.getTime())) attrs.expires = date;
+    }
+  }
+  return attrs;
+};
+
+const readCookieAttributesFromSetCookieHeaders = (setCookieHeaders = [], candidateNames = []) => {
+  const loweredCandidates = candidateNames.map((name) => String(name || "").trim().toLowerCase());
+  for (const raw of setCookieHeaders) {
+    const firstPair = String(raw || "").split(";")[0] || "";
+    const idx = firstPair.indexOf("=");
+    if (idx < 0) continue;
+    const name = firstPair.slice(0, idx).trim().toLowerCase();
+    if (!loweredCandidates.includes(name)) continue;
+    const attrs = parseSetCookieAttributes(raw);
+    if (attrs.maxAge != null || attrs.expires) return attrs;
+  }
+  return { maxAge: null, expires: null };
+};
+
+const readJwtExpirySeconds = (token) => {
+  try {
+    const raw = String(token || "").trim();
+    if (!raw) return null;
+    const parts = raw.split(".");
+    if (parts.length < 2) return null;
+    const payloadJson = Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+    const payload = JSON.parse(payloadJson);
+    const exp = Number(payload?.exp);
+    if (!Number.isFinite(exp)) return null;
+    const now = Math.floor(Date.now() / 1000);
+    const diff = exp - now;
+    return diff > 0 ? diff : null;
+  } catch {
+    return null;
+  }
+};
+
+const buildExpiryOptions = ({ maxAgeSeconds = null, expiresAt = null } = {}) => {
+  const options = {};
+  if (Number.isFinite(maxAgeSeconds)) {
+    options.maxAge = Math.max(1, Math.floor(maxAgeSeconds));
+    return options;
+  }
+  if (expiresAt instanceof Date && !Number.isNaN(expiresAt.getTime())) {
+    options.expires = expiresAt;
+  }
+  return options;
+};
+
 const readAuthAppBaseUrl = () => {
   const raw = String(process.env.NEXT_PUBLIC_APP_URL || "").trim();
   if (!raw) return "";
@@ -336,6 +401,24 @@ export async function POST(request) {
               "csrf_token",
               "csrfToken",
             ]);
+          const expiresIn = readExpiresInFromPayload(fallbackPayload);
+          const refreshCookieAttrs = readCookieAttributesFromSetCookieHeaders(
+            fallbackSetCookies,
+            ["refresh_token_property", "refresh_token", "refreshToken_property", "refreshToken", "property_refresh_token"]
+          );
+          const csrfCookieAttrs = readCookieAttributesFromSetCookieHeaders(
+            fallbackSetCookies,
+            ["csrf_token_property", "csrf_token", "csrfToken"]
+          );
+          const refreshMaxAgeFromJwt = refreshToken ? readJwtExpirySeconds(refreshToken) : null;
+          const refreshExpiry = buildExpiryOptions({
+            maxAgeSeconds: refreshCookieAttrs.maxAge ?? refreshMaxAgeFromJwt ?? null,
+            expiresAt: refreshCookieAttrs.expires || null,
+          });
+          const csrfExpiry = buildExpiryOptions({
+            maxAgeSeconds: csrfCookieAttrs.maxAge ?? refreshMaxAgeFromJwt ?? expiresIn ?? null,
+            expiresAt: csrfCookieAttrs.expires || null,
+          });
 
           const response = NextResponse.json(
             {
@@ -357,6 +440,7 @@ export async function POST(request) {
               secure: cookieOptions.secure,
               ...(cookieOptions?.domain ? { domain: cookieOptions.domain } : {}),
               path: "/",
+              ...refreshExpiry,
             });
           }
 
@@ -369,6 +453,7 @@ export async function POST(request) {
               secure: cookieOptions.secure,
               ...(cookieOptions?.domain ? { domain: cookieOptions.domain } : {}),
               path: "/",
+              ...csrfExpiry,
             });
           }
 
@@ -419,6 +504,23 @@ export async function POST(request) {
       "csrfToken",
     ]);
   const expiresIn = readExpiresInFromPayload(upstreamPayload);
+  const refreshCookieAttrs = readCookieAttributesFromSetCookieHeaders(
+    upstreamSetCookies,
+    ["refresh_token_property", "refresh_token", "refreshToken_property", "refreshToken", "property_refresh_token"]
+  );
+  const csrfCookieAttrs = readCookieAttributesFromSetCookieHeaders(
+    upstreamSetCookies,
+    ["csrf_token_property", "csrf_token", "csrfToken"]
+  );
+  const refreshMaxAgeFromJwt = refreshToken ? readJwtExpirySeconds(refreshToken) : null;
+  const refreshExpiry = buildExpiryOptions({
+    maxAgeSeconds: refreshCookieAttrs.maxAge ?? refreshMaxAgeFromJwt ?? null,
+    expiresAt: refreshCookieAttrs.expires || null,
+  });
+  const csrfExpiry = buildExpiryOptions({
+    maxAgeSeconds: csrfCookieAttrs.maxAge ?? refreshMaxAgeFromJwt ?? expiresIn ?? null,
+    expiresAt: csrfCookieAttrs.expires || null,
+  });
 
   const response = NextResponse.json(
     {
@@ -440,6 +542,7 @@ export async function POST(request) {
       secure: cookieOptions.secure,
       ...(cookieOptions?.domain ? { domain: cookieOptions.domain } : {}),
       path: "/",
+      ...refreshExpiry,
     });
   }
 
@@ -452,6 +555,7 @@ export async function POST(request) {
       secure: cookieOptions.secure,
       ...(cookieOptions?.domain ? { domain: cookieOptions.domain } : {}),
       path: "/",
+      ...csrfExpiry,
     });
   }
 
