@@ -366,3 +366,57 @@ if (typeof globalThis !== "undefined" && !globalThis.__SEANEB_AUTH_SAFE_MODE_API
   globalThis.__SEANEB_AUTH_SAFE_MODE_API_CLIENT_FE__ = true;
   console.info("[AUTH SAFE MODE] using shared auth layer");
 }
+
+// =============== AXIOS-COMPATIBLE DEFAULT EXPORT ===============
+// Create a default export that mimics axios API for backward compatibility
+const createAxiosCompatibleApi = () => {
+  const api = async (config) => {
+    const { method = "GET", url, data, params, headers = {} } = config;
+    const path = params ? `${url}?${new URLSearchParams(params)}` : url;
+    
+    const options = {
+      method: method.toUpperCase(),
+      headers,
+    };
+    
+    if (data && typeof data === "object") {
+      options.body = JSON.stringify(data);
+      options.headers["content-type"] = "application/json";
+    }
+    
+    const response = await apiRequest(path, options);
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    
+    const result = {
+      data: payload,
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+      config,
+    };
+    
+    if (!response.ok) {
+      const error = new Error(payload?.message || `HTTP ${response.status}`);
+      error.response = result;
+      throw error;
+    }
+    
+    return result;
+  };
+  
+  // Add method shortcuts
+  api.get = (url, config = {}) => api({ ...config, method: "GET", url });
+  api.post = (url, data, config = {}) => api({ ...config, method: "POST", url, data });
+  api.put = (url, data, config = {}) => api({ ...config, method: "PUT", url, data });
+  api.patch = (url, data, config = {}) => api({ ...config, method: "PATCH", url, data });
+  api.delete = (url, config = {}) => api({ ...config, method: "DELETE", url });
+  
+  return api;
+};
+
+export default createAxiosCompatibleApi();

@@ -21,6 +21,7 @@ import {
   setAuthUserLoggedOut,
 } from "@/services/user.service";
 import { getAuthAppOrigin } from "@/lib/core/appUrls";
+import { removeCookie, setCookie } from "@/lib/core/cookies";
 
 const AuthContext = createContext(null);
 const AUTH_SSO_RESULT_KEY = "seaneb_sso_exchange_result";
@@ -265,11 +266,32 @@ export function ListingAuthProvider({ children }) {
       if (messageType === BUSINESS_REGISTER_SUCCESS_MESSAGE_TYPE) {
         console.log("[auth] Received cross-tab message:", event.data);
         if (!allowedAuthOrigin || event.origin !== allowedAuthOrigin) return;
+        const businessPayload =
+          event.data?.payload && typeof event.data.payload === "object" ? event.data.payload : {};
+        const businessId = String(businessPayload?.businessId || businessPayload?.business_id || "").trim();
+        const branchId = String(businessPayload?.branchId || businessPayload?.branch_id || "").trim();
         try {
           window.localStorage.removeItem(BUSINESS_REGISTER_LOCK_KEY);
         } catch {
           // ignore storage errors
         }
+        setCookie("business_registered", "true", {
+          maxAge: 60 * 60 * 24 * 30,
+          path: "/",
+        });
+        if (businessId) {
+          setCookie("business_id", businessId, {
+            maxAge: 60 * 60 * 24 * 30,
+            path: "/",
+          });
+        }
+        if (branchId) {
+          setCookie("branch_id", branchId, {
+            maxAge: 60 * 60 * 24 * 30,
+            path: "/",
+          });
+        }
+        removeCookie("business_onboarding_resume", { path: "/" });
         console.log("[auth] Restoring session after business registration");
         void restoreSession({ force: true });
         notifyAuthChanged();

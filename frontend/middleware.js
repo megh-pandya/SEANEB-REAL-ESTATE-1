@@ -33,6 +33,37 @@ const toBool = (value) => {
   return normalized === "true" || normalized === "1" || normalized === "yes";
 };
 
+const isExplicitFalse = (value) => {
+  if (value === false) return true;
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "false" || normalized === "0" || normalized === "no";
+};
+
+const normalizeBusinessStatus = (value) => String(value ?? "").trim().toUpperCase();
+const ACTIVE_BUSINESS_STATUSES = new Set([
+  "ACTIVE",
+  "SUCCESS",
+  "SUCCEEDED",
+  "PAID",
+  "CAPTURED",
+  "COMPLETED",
+]);
+const NON_ACTIVE_BUSINESS_STATUSES = new Set([
+  "PENDING",
+  "PROCESSING",
+  "INITIATED",
+  "CREATED",
+  "NOT_ATTEMPTED",
+  "FAILED",
+  "FAILURE",
+  "ERROR",
+  "CANCELLED",
+  "CANCELED",
+  "DECLINED",
+  "EXPIRED",
+  "TERMINATED",
+]);
+
 const readProfilePayload = (payload) => {
   const profile =
     payload?.data?.profile ||
@@ -46,31 +77,111 @@ const readProfilePayload = (payload) => {
 
 const hasBusinessFromProfile = (profile) => {
   const data = profile || {};
+  const explicitRegisteredTrue =
+    toBool(data.is_business_registered) ||
+    toBool(data.business_registered) ||
+    toBool(data.is_business);
+  const explicitRegisteredFalse =
+    isExplicitFalse(data.is_business_registered) ||
+    isExplicitFalse(data.business_registered);
+  const showPayNowHint =
+    toBool(data.onboarding?.show_pay_now) ||
+    toBool(data.onboarding?.showPayNow) ||
+    toBool(data.show_pay_now) ||
+    toBool(data.showPayNow);
+  const limitedAccess =
+    toBool(data.auth_limited) ||
+    toBool(data.limited) ||
+    toBool(data.panel_access_restricted) ||
+    toBool(data.branch_required);
+  const branchStatuses = [
+    data.branch_status,
+    data.branchStatus,
+    data.current_branch_status,
+    data.currentBranchStatus,
+    data.default_branch_status,
+    data.defaultBranchStatus,
+    data.branch?.status,
+    data.current_branch?.status,
+    data.currentBranch?.status,
+    data.default_branch?.status,
+    data.defaultBranch?.status,
+    data.business?.branch_status,
+    data.business?.branchStatus,
+    data.onboarding?.branch_status,
+    data.onboarding?.branchStatus,
+    data.onboarding?.status,
+    data.onboarding_status,
+    data.onboardingStatus,
+  ]
+    .map(normalizeBusinessStatus)
+    .filter(Boolean);
+  const hasActiveBranch = branchStatuses.some((status) => ACTIVE_BUSINESS_STATUSES.has(status));
+  const hasKnownNonActiveBranch = branchStatuses.some((status) =>
+    NON_ACTIVE_BUSINESS_STATUSES.has(status)
+  );
+  const hasOnboardingObject =
+    data.onboarding && typeof data.onboarding === "object" && !Array.isArray(data.onboarding);
+  const hasWeakLegacyBusinessHints =
+    Boolean(
+      data.business_id ||
+        data.business_uuid ||
+        data.branch_id ||
+        data.branch_uuid ||
+        data.broker_id ||
+        data.company_id ||
+        data.onboarding?.business_id ||
+        data.onboarding?.branch_id ||
+        (data.business &&
+          typeof data.business === "object" &&
+          (data.business.id ||
+            data.business.business_id ||
+            data.business.uuid ||
+            data.business.branch_id)) ||
+        (data.branch &&
+          typeof data.branch === "object" &&
+          (data.branch.id ||
+            data.branch.branch_id ||
+            data.branch.uuid ||
+            data.branch.business_id))
+    );
+  const hasStrongLegacyBusinessHints =
+    (typeof data.business_count === "number" && data.business_count > 0) ||
+    (Array.isArray(data.businesses) && data.businesses.length > 0) ||
+    (Array.isArray(data.user_businesses) && data.user_businesses.length > 0) ||
+    (Array.isArray(data.branches) && data.branches.length > 0) ||
+    (Array.isArray(data.user_branches) && data.user_branches.length > 0);
+  const onboardingState = normalizeBusinessStatus(
+    data.onboarding?.state ||
+      data.onboarding?.stage ||
+      data.onboarding?.step ||
+      data.onboarding_state ||
+      data.onboardingState
+  );
 
-  if (toBool(data.is_business_registered)) return true;
-  if (toBool(data.has_business) || toBool(data.business_registered) || toBool(data.is_business)) {
-    return true;
-  }
-  if (typeof data.business_count === "number" && data.business_count > 0) return true;
-
+  if (hasActiveBranch) return true;
   if (
-    data.business_id ||
-    data.business_uuid ||
-    data.branch_id ||
-    data.branch_uuid ||
-    data.broker_id ||
-    data.company_id
+    explicitRegisteredFalse ||
+    limitedAccess ||
+    hasKnownNonActiveBranch ||
+    showPayNowHint ||
+    ((hasOnboardingObject || Boolean(onboardingState)) && !explicitRegisteredTrue) ||
+    ((hasOnboardingObject || Boolean(onboardingState) || showPayNowHint) &&
+      (hasWeakLegacyBusinessHints || hasStrongLegacyBusinessHints))
   ) {
-    return true;
+    return false;
   }
-
-  if (Array.isArray(data.businesses) && data.businesses.length > 0) return true;
-  if (Array.isArray(data.user_businesses) && data.user_businesses.length > 0) return true;
-  if (Array.isArray(data.branches) && data.branches.length > 0) return true;
-  if (Array.isArray(data.user_branches) && data.user_branches.length > 0) return true;
+  if (explicitRegisteredTrue) return true;
+  if (hasStrongLegacyBusinessHints) return true;
 
   return false;
 };
+
+const hasPendingBusinessCookie = (request) =>
+  toBool(request.cookies.get("business_onboarding_resume")?.value || "");
+
+const hasRegisteredBusinessCookie = (request) =>
+  toBool(request.cookies.get("business_registered")?.value || "");
 
 const hasAnyCookie = (request, names = []) =>
   names.some((name) => Boolean(String(request.cookies.get(name)?.value || "").trim()));
@@ -366,8 +477,13 @@ export async function middleware(request) {
 
   let sessionState;
   if (isThrottled && (hasRefreshCookie || hasCsrfSessionHint)) {
-    // Trust that the recent refresh is still valid; let client-side auth handle restoration
-    sessionState = { authenticated: true, hasBusiness: true, setCookies: [] };
+    // Trust that the recent refresh is still valid, but do not promote the user into
+    // business access without a real validated profile.
+    sessionState = {
+      authenticated: true,
+      hasBusiness: hasRegisteredBusinessCookie(request) && !hasPendingBusinessCookie(request),
+      setCookies: [],
+    };
   } else {
     sessionState = await getValidatedSessionState(request);
   }

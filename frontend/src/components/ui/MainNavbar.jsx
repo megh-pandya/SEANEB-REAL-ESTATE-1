@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import BrandLogo from "./BrandLogo";
 import TempUserAvatar from "./TempUserAvatar";
@@ -12,7 +12,8 @@ import { getAuthAppUrl } from "@/lib/core/appUrls";
 import { useListingAuth } from "@/hooks/auth/useListingAuth";
 import { getCountries } from "@/services/property.service";
 import {
-  hasBusinessFromProfile,
+  getBusinessRegistrationStateFromProfile,
+  syncPendingBusinessRegistrationFromSearch,
   syncBusinessRegistrationCookie,
 } from "@/services/user.service";
 import { openAuthPathWithBridge, openBusinessRegisterFlow, openAuthLoginTab } from "@/lib/crossAppTabNavigation";
@@ -98,9 +99,11 @@ export default function MainNavbar() {
   const [themeMode, setThemeMode] = useState(THEME_MODES.SYSTEM);
   const dropdownRef = useRef(null);
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const isHomeRoute = pathname === "/" || pathname === "/home";
   const { status: authStatus, user: profile, logout } = useListingAuth();
   const [hasBusiness, setHasBusiness] = useState(false);
+  const [hasPendingBusinessOnboarding, setHasPendingBusinessOnboarding] = useState(false);
   const [countryBadgeName, setCountryBadgeName] = useState("");
   const fallbackEmail = getCookie("verified_email") || getCookie("user_email") || "";
   const fallbackSeaNebId = getCookie("seaneb_id") || "";
@@ -120,7 +123,7 @@ export default function MainNavbar() {
   const userSeaNebId = String(profile?.seaneb_id || profile?.seanebId || fallbackSeaNebId || "").trim();
   const profilePhoto = String(profile?.profile_photo || profile?.profilePhoto || "").trim();
   const profileUrl = getAuthAppUrl("/dashboard/broker");
-  const canShowAuthenticated = hydrated && authStatus === "authenticated" && Boolean(profile);
+  const canShowAuthenticated = hydrated && authStatus === "authenticated";
   const downloadSectionHref = "/home#download";
 
   const handleGetAppClick = (event) => {
@@ -183,13 +186,20 @@ export default function MainNavbar() {
   }, []);
 
   useEffect(() => {
-    if (profile) {
-      const business = hasBusinessFromProfile(profile || {});
-      setHasBusiness(business);
-      syncBusinessRegistrationCookie(profile || {});
+    syncPendingBusinessRegistrationFromSearch(searchParams);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (authStatus !== "authenticated") {
+      setHasBusiness(false);
+      setHasPendingBusinessOnboarding(false);
       return;
     }
-    if (authStatus !== "authenticated") setHasBusiness(false);
+
+    const businessState = getBusinessRegistrationStateFromProfile(profile || {});
+    setHasBusiness(Boolean(businessState.registered));
+    setHasPendingBusinessOnboarding(Boolean(businessState.pending));
+    syncBusinessRegistrationCookie(profile || {});
   }, [profile, authStatus]);
 
   useEffect(() => {
@@ -261,7 +271,9 @@ export default function MainNavbar() {
     if (event?.preventDefault) event.preventDefault();
     setIsProfileOpen(false);
 
-    const isBusinessRegisteredNow = hasBusinessFromProfile(profile || {});
+    const businessState = getBusinessRegistrationStateFromProfile(profile || {});
+    const isBusinessRegisteredNow = Boolean(businessState.registered);
+    const hasPendingBusinessRegistrationNow = Boolean(businessState.pending);
 
     if (isBusinessRegisteredNow) {
       void guardDashboardNavigation({
@@ -272,6 +284,11 @@ export default function MainNavbar() {
           openAuthLoginTab();
         },
       });
+      return;
+    }
+
+    if (hasPendingBusinessRegistrationNow) {
+      openBusinessRegisterFlow();
       return;
     }
 
@@ -450,7 +467,13 @@ export default function MainNavbar() {
                           className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-[#403125] transition hover:bg-[#f8f1e5]"
                         >
                           <span aria-hidden="true">{"\u25A6"}</span>
-                          <span>{hasBusiness ? "Open Dashboard" : "Register Business"}</span>
+                          <span>
+                            {hasBusiness
+                              ? "Open Dashboard"
+                              : hasPendingBusinessOnboarding
+                                ? "Complete Registration"
+                                : "Register Business"}
+                          </span>
                         </Link>
                         <div className="h-px bg-[#efe9df]" />
                         <button

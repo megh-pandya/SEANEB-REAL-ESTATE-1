@@ -382,7 +382,12 @@ export const clearAccessToken = () => {
 export const refreshAccessToken = async () => {
   if (!(await hasRefreshSessionHint())) {
     console.log("[refreshHandler] No refresh session, skipping refresh");
-    throw new Error("No refresh session available");
+    // If there is no refresh session, we avoid surfacing this as an error.
+    // This prevents noisy warnings from legitimate public/unauthenticated flows.
+    lastRefreshStatus = "failed";
+    lastRefreshAt = Date.now();
+    lastRefreshError = "No refresh session available";
+    return null;
   }
 
   refreshPromise = _refreshLock.run();

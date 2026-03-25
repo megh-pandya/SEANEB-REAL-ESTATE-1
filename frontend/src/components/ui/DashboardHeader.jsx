@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCookie } from "@/lib/core/cookies";
 import {
@@ -11,7 +11,11 @@ import {
   getDashboardMode,
   setDashboardMode,
 } from "@/services/property.service";
-import { hasBusinessFromProfile, syncBusinessRegistrationCookie } from "@/services/user.service";
+import {
+  getBusinessRegistrationStateFromProfile,
+  syncBusinessRegistrationCookie,
+  syncPendingBusinessRegistrationFromSearch,
+} from "@/services/user.service";
 import BrandLogo from "./BrandLogo";
 import { logoutAndClearAuthSession } from "@/services/auth.service";
 import { getDefaultProductName } from "@/services/property.service";
@@ -21,11 +25,13 @@ import { getAuthAppUrl } from "@/lib/core/appUrls";
 
 export default function DashboardHeader({ showLogout = true }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { status: authStatus, user: authProfile } = useListingAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [dashboardMode, setDashboardModeState] = useState(DASHBOARD_MODE_USER);
   const [hasBusiness, setHasBusiness] = useState(false);
+  const [hasPendingBusinessOnboarding, setHasPendingBusinessOnboarding] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -43,10 +49,21 @@ export default function DashboardHeader({ showLogout = true }) {
   }, []);
 
   useEffect(() => {
-    const business = hasBusinessFromProfile(profile || {});
-    setHasBusiness(Boolean(business));
+    syncPendingBusinessRegistrationFromSearch(searchParams);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (authStatus !== "authenticated") {
+      setHasBusiness(false);
+      setHasPendingBusinessOnboarding(false);
+      return;
+    }
+
+    const businessState = getBusinessRegistrationStateFromProfile(profile || {});
+    setHasBusiness(Boolean(businessState.registered));
+    setHasPendingBusinessOnboarding(Boolean(businessState.pending));
     syncBusinessRegistrationCookie(profile || {});
-  }, [profile]);
+  }, [authStatus, profile]);
 
   useEffect(() => {
     const onClickOutside = (event) => {
@@ -159,7 +176,11 @@ export default function DashboardHeader({ showLogout = true }) {
                   onClick={handleModeSwitch}
                   className="mt-4 w-full rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 transition-colors hover:bg-indigo-100"
                 >
-                  {hasBusiness ? "Switch to Business Dashboard" : "Business Register"}
+                  {hasBusiness
+                    ? "Switch to Business Dashboard"
+                    : hasPendingBusinessOnboarding
+                      ? "Complete Registration"
+                      : "Business Register"}
                 </button>
               )}
               <button

@@ -1,4 +1,8 @@
-import api from "@/lib/api/client";
+// CRITICAL FIX: Migrate from legacy client to unified auth client
+// property.service.js was using @/lib/api/client with its own refresh logic,
+// while components used @/lib/auth/apiClient. This caused token desync,
+// race conditions, and 401 errors. Now all API calls use the unified auth client.
+import api from "@/lib/auth/apiClient";
 import { removeCookie, getCookie, setCookie } from "@/lib/core/cookies";
 
 export const DASHBOARD_MODE_USER = "user";
