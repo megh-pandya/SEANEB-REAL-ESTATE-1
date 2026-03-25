@@ -86,7 +86,8 @@ export function RentPropertyContent({ place = "" }) {
   );
 }
 
-export default function RentPropertyPage({ searchParams }) {
-  const place = toPlaceLabel(searchParams?.place);
+export default async function RentPropertyPage({ searchParams }) {
+  const resolvedSearchParams = await searchParams;
+  const place = toPlaceLabel(resolvedSearchParams?.place);
   return <RentPropertyContent place={place} />;
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { API_REMOTE_BASE_URL } from "@/lib/core/apiBaseUrl";
+import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
 import { getCookieOptions, sanitizeCookieDomain } from "@/lib/auth/cookieOptions";
 
 const PRODUCT_KEY =
@@ -8,6 +8,17 @@ const DEFAULT_COOKIE_DOMAIN =
   String(process.env.NODE_ENV || "").trim() === "production" ? ".seaneb.com" : "";
 const normalizeProductKey = (value) =>
   String(value || "").trim() || PRODUCT_KEY;
+const buildBaseCandidates = () =>
+  Array.from(new Set([API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL].filter(Boolean)));
+const buildProfileCandidates = () =>
+  buildBaseCandidates().flatMap((base) => [
+    { base, url: `${base}/profile/me` },
+    { base, url: `${base}/auth/me` },
+  ]);
+const buildRefreshCandidates = (preferredBase = "") =>
+  Array.from(new Set([preferredBase, ...buildBaseCandidates()].filter(Boolean))).map(
+    (base) => `${base}/auth/refresh`
+  );
 
 const REFRESH_COOKIE_KEYS = [
   "refresh_token_property",
@@ -459,10 +470,18 @@ const mergeCookieHeaderWithSetCookie = (cookieHeader, setCookieHeaders = []) => 
 };
 
 export async function GET(request) {
-  const upstreamCandidates = [
-    `${API_REMOTE_BASE_URL}/profile/me`,
-    `${API_REMOTE_BASE_URL}/auth/me`,
-  ];
+  const upstreamCandidates = buildProfileCandidates();
+  if (upstreamCandidates.length === 0) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "UPSTREAM_AUTH_ME_UNAVAILABLE",
+          message: "Auth me upstream is not configured",
+        },
+      },
+      { status: 502 }
+    );
+  }
   const incomingProductKey = normalizeProductKey(
     request.headers.get("x-product-key") || request.headers.get("X-Product-Key") || PRODUCT_KEY
   );
@@ -495,7 +514,9 @@ export async function GET(request) {
   let refreshAttempted = false;
   let refreshSucceeded = false;
   let refreshPayloadForCookies = {};
-  for (const upstreamUrl of upstreamCandidates) {
+  for (const upstreamCandidate of upstreamCandidates) {
+    const upstreamUrl = upstreamCandidate?.url || "";
+    const preferredRefreshBase = String(upstreamCandidate?.base || "").trim();
     try {
       let response = await fetch(upstreamUrl, {
         method: "GET",
@@ -518,37 +539,44 @@ export async function GET(request) {
         if (incomingCookie) refreshHeaders.set("cookie", incomingCookie);
 
         let refreshResponse = null;
-        try {
-          refreshResponse = await fetch(`${API_REMOTE_BASE_URL}/auth/refresh`, {
-            method: "POST",
-            headers: refreshHeaders,
-            body: JSON.stringify({ product_key: incomingProductKey }),
-            cache: "no-store",
-          });
-        } catch {
-          refreshResponse = null;
-        }
-
-        // CSRF can be stale after cross-app auth hops; retry refresh once without CSRF.
-        if (
-          refreshResponse &&
-          [401, 403].includes(Number(refreshResponse.status || 0)) &&
-          incomingCsrf
-        ) {
-          const noCsrfHeaders = new Headers(refreshHeaders);
-          noCsrfHeaders.delete("x-csrf-token");
+        for (const refreshUrl of buildRefreshCandidates(preferredRefreshBase)) {
           try {
-            const noCsrfRefresh = await fetch(`${API_REMOTE_BASE_URL}/auth/refresh`, {
+            refreshResponse = await fetch(refreshUrl, {
               method: "POST",
-              headers: noCsrfHeaders,
+              headers: refreshHeaders,
               body: JSON.stringify({ product_key: incomingProductKey }),
               cache: "no-store",
             });
-            if (noCsrfRefresh.ok) {
-              refreshResponse = noCsrfRefresh;
-            }
           } catch {
-            // Keep original refresh response.
+            refreshResponse = null;
+            continue;
+          }
+
+          // CSRF can be stale after cross-app auth hops; retry refresh once without CSRF.
+          if (
+            refreshResponse &&
+            [401, 403].includes(Number(refreshResponse.status || 0)) &&
+            incomingCsrf
+          ) {
+            const noCsrfHeaders = new Headers(refreshHeaders);
+            noCsrfHeaders.delete("x-csrf-token");
+            try {
+              const noCsrfRefresh = await fetch(refreshUrl, {
+                method: "POST",
+                headers: noCsrfHeaders,
+                body: JSON.stringify({ product_key: incomingProductKey }),
+                cache: "no-store",
+              });
+              if (noCsrfRefresh.ok || ![401, 403].includes(Number(noCsrfRefresh.status || 0))) {
+                refreshResponse = noCsrfRefresh;
+              }
+            } catch {
+              // Keep original refresh response for this candidate.
+            }
+          }
+
+          if (refreshResponse && Number(refreshResponse.status || 0) < 500) {
+            break;
           }
         }
 

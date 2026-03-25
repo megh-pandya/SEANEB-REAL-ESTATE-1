@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import BrandLogo from "./BrandLogo";
 import TempUserAvatar from "./TempUserAvatar";
 import navbarLinks from "@/data/navbarLinks.json";
@@ -90,7 +90,7 @@ function NavbarItem({ item, isActive, onNavigate, tone = "desktop" }) {
   );
 }
 
-export default function MainNavbar() {
+function MainNavbarContent() {
   const router = useRouter();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -548,6 +548,14 @@ export default function MainNavbar() {
     </header>
     {!isHomeRoute && <div className="h-[88px] bg-[#6a4300]" aria-hidden="true" />}
     </>
+  );
+}
+
+export default function MainNavbar() {
+  return (
+    <Suspense fallback={null}>
+      <MainNavbarContent />
+    </Suspense>
   );
 }
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
@@ -12,7 +13,7 @@ function formatPrice(value) {
   return text || "Price on request";
 }
 
-export default function BusinessListingPage({ title, subtitle, businesses = [] }) {
+function BusinessListingPageContent({ title, subtitle, businesses = [] }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const queryText = searchParams?.toString() || "";
@@ -77,5 +78,13 @@ export default function BusinessListingPage({ title, subtitle, businesses = [] }
         )}
       </div>
     </section>
+  );
+}
+
+export default function BusinessListingPage(props) {
+  return (
+    <Suspense fallback={null}>
+      <BusinessListingPageContent {...props} />
+    </Suspense>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import BlogCard from "@/components/marketing/cards/BlogCard";
 
@@ -8,7 +9,7 @@ const PER_PAGE = 6;
 /**
  * Blog listing UI with search, category filtering, and pagination.
  */
-export default function BlogListingSection({ categories = [], posts = [], popular = [], newsletter }) {
+function BlogListingSectionContent({ categories = [], posts = [], popular = [], newsletter }) {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
@@ -156,5 +157,13 @@ export default function BlogListingSection({ categories = [], posts = [], popula
         </div>
       </section>
     </>
+  );
+}
+
+export default function BlogListingSection(props) {
+  return (
+    <Suspense fallback={null}>
+      <BlogListingSectionContent {...props} />
+    </Suspense>
   );
 }

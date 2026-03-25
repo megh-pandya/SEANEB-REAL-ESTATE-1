@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { getCookie } from "@/lib/core/cookies";
 import {
   DASHBOARD_MODE_BUSINESS,
@@ -23,7 +23,7 @@ import { useListingAuth } from "@/lib/auth/AuthProvider";
 import { openAuthPathWithBridge, openBusinessRegisterFlow } from "@/lib/crossAppTabNavigation";
 import { getAuthAppUrl } from "@/lib/core/appUrls";
 
-export default function DashboardHeader({ showLogout = true }) {
+function DashboardHeaderContent({ showLogout = true }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { status: authStatus, user: authProfile } = useListingAuth();
@@ -208,6 +208,14 @@ export default function DashboardHeader({ showLogout = true }) {
         </div>
       </div>
     </header>
+  );
+}
+
+export default function DashboardHeader(props) {
+  return (
+    <Suspense fallback={null}>
+      <DashboardHeaderContent {...props} />
+    </Suspense>
   );
 }
 

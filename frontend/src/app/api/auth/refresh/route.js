@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { API_REMOTE_BASE_URL } from "@/lib/core/apiBaseUrl";
+import { API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL } from "@/lib/core/apiBaseUrl";
 import {
   validateCookiePolicyRuntime,
   validateSetCookieHeadersRuntime,
@@ -54,6 +54,10 @@ const CSRF_COOKIE_KEYS = [
 const CLEAR_AUTH_COOKIE_KEYS = Array.from(
   new Set([...REFRESH_COOKIE_KEYS, ...ACCESS_COOKIE_KEYS, ...CSRF_COOKIE_KEYS])
 );
+const buildUpstreamCandidates = () =>
+  Array.from(new Set([API_REMOTE_BASE_URL, API_REMOTE_FALLBACK_BASE_URL].filter(Boolean))).map(
+    (baseUrl) => `${String(baseUrl).replace(/\/+$/, "")}/auth/refresh`
+  );
 
 // --- Server-side refresh deduplication to prevent race conditions on hard refresh ---
 const _refreshDedup = new Map();
@@ -476,9 +480,9 @@ export async function GET() {
 }
 
 export async function POST(request) {
-  // ✅ Validate API_REMOTE_BASE_URL before using
-  if (!API_REMOTE_BASE_URL) {
-    console.error("[refresh] API_REMOTE_BASE_URL is not configured in .env");
+  const upstreamCandidates = buildUpstreamCandidates();
+  if (upstreamCandidates.length === 0) {
+    console.error("[refresh] No refresh upstream is configured in .env");
     return NextResponse.json(
       { error: { code: "CONFIG_ERROR", message: "API base URL not configured" } },
       { status: 500 }
@@ -487,8 +491,7 @@ export async function POST(request) {
 
   const cookieOptions = getCookieOptions(request);
 
-  // ✅ Log upstream URL for easier debugging
-  const upstreamUrl = `${API_REMOTE_BASE_URL}/auth/refresh`;
+  let upstreamUrl = upstreamCandidates[0];
   ssoDebugLog("refresh.attempt", { route: "/api/auth/refresh", upstreamUrl });
 
   const incomingCookie = String(request.headers.get("cookie") || "").trim();
@@ -611,38 +614,47 @@ export async function POST(request) {
     product_key: productKey,
   });
 
-  try {
-    upstreamResponse = await fetch(upstreamUrl, {
-      method: "POST",
-      headers,
-      body,
-      cache: "no-store",
-    });
-  } catch (err) {
-    networkError = err;
-    upstreamResponse = null;
-  }
+  for (const candidateUrl of upstreamCandidates) {
+    upstreamUrl = candidateUrl;
 
-  // CSRF may be stale — retry once without CSRF before failing
-  if (
-    upstreamResponse &&
-    [401, 403].includes(Number(upstreamResponse.status || 0)) &&
-    incomingCsrf
-  ) {
-    const noCsrfHeaders = new Headers(headers);
-    noCsrfHeaders.delete("x-csrf-token");
     try {
-      const noCsrfResponse = await fetch(upstreamUrl, {
+      upstreamResponse = await fetch(upstreamUrl, {
         method: "POST",
-        headers: noCsrfHeaders,
+        headers,
         body,
         cache: "no-store",
       });
-      if (noCsrfResponse.ok) {
-        upstreamResponse = noCsrfResponse;
+    } catch (err) {
+      networkError = err;
+      upstreamResponse = null;
+      continue;
+    }
+
+    // CSRF may be stale; retry this candidate once without CSRF before failing over.
+    if (
+      upstreamResponse &&
+      [401, 403].includes(Number(upstreamResponse.status || 0)) &&
+      incomingCsrf
+    ) {
+      const noCsrfHeaders = new Headers(headers);
+      noCsrfHeaders.delete("x-csrf-token");
+      try {
+        const noCsrfResponse = await fetch(upstreamUrl, {
+          method: "POST",
+          headers: noCsrfHeaders,
+          body,
+          cache: "no-store",
+        });
+        if (noCsrfResponse.ok || ![401, 403].includes(Number(noCsrfResponse.status || 0))) {
+          upstreamResponse = noCsrfResponse;
+        }
+      } catch {
+        // Keep original response if no-CSRF retry fails.
       }
-    } catch {
-      // Keep original response if no-CSRF retry fails
+    }
+
+    if (upstreamResponse && Number(upstreamResponse.status || 0) < 500) {
+      break;
     }
   }
 

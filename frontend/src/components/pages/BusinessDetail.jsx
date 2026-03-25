@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import MainNavbar from "@/components/ui/MainNavbar";
 import { getBusinessDetailsBySeanebId } from "@/services/property.service";
 
-export default function BusinessDetail({ businessSlug }) {
+function BusinessDetailContent({ businessSlug }) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -305,6 +305,14 @@ export default function BusinessDetail({ businessSlug }) {
         </div>
       </div>
     </>
+  );
+}
+
+export default function BusinessDetail(props) {
+  return (
+    <Suspense fallback={null}>
+      <BusinessDetailContent {...props} />
+    </Suspense>
   );
 }
 

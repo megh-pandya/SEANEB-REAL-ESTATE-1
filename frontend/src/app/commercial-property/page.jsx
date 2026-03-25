@@ -86,7 +86,8 @@ export function CommercialPropertyContent({ place = "" }) {
   );
 }
 
-export default function CommercialPropertyPage({ searchParams }) {
-  const place = toPlaceLabel(searchParams?.place);
+export default async function CommercialPropertyPage({ searchParams }) {
+  const resolvedSearchParams = await searchParams;
+  const place = toPlaceLabel(resolvedSearchParams?.place);
   return <CommercialPropertyContent place={place} />;
 }

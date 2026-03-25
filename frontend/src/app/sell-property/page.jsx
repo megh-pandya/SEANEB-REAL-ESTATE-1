@@ -86,7 +86,8 @@ export function SellPropertyContent({ place = "" }) {
   );
 }
 
-export default function SellPropertyPage({ searchParams }) {
-  const place = toPlaceLabel(searchParams?.place);
+export default async function SellPropertyPage({ searchParams }) {
+  const resolvedSearchParams = await searchParams;
+  const place = toPlaceLabel(resolvedSearchParams?.place);
   return <SellPropertyContent place={place} />;
 }
