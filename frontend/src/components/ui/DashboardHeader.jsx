@@ -30,8 +30,6 @@ function DashboardHeaderContent({ showLogout = true }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [dashboardMode, setDashboardModeState] = useState(DASHBOARD_MODE_USER);
-  const [hasBusiness, setHasBusiness] = useState(false);
-  const [hasPendingBusinessOnboarding, setHasPendingBusinessOnboarding] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -42,10 +40,22 @@ function DashboardHeaderContent({ showLogout = true }) {
   const productName = getDefaultProductName();
   const authDashboardUrl = getAuthAppUrl("/dashboard");
   const authBusinessDashboardUrl = getAuthAppUrl("/dashboard/broker");
+  const businessState = useMemo(() => {
+    if (authStatus !== "authenticated") {
+      return { registered: false, pending: false };
+    }
+    return getBusinessRegistrationStateFromProfile(profile || {});
+  }, [authStatus, profile]);
+  const hasBusiness = Boolean(businessState.registered);
+  const hasPendingBusinessOnboarding = Boolean(businessState.pending);
+  const businessCtaLabel = hasBusiness
+    ? "Open Dashboard"
+    : hasPendingBusinessOnboarding
+      ? "Complete Registration"
+      : "Register Business";
 
   useEffect(() => {
     setDashboardModeState(getDashboardMode());
-    setHasBusiness(false);
   }, []);
 
   useEffect(() => {
@@ -53,15 +63,7 @@ function DashboardHeaderContent({ showLogout = true }) {
   }, [searchParams]);
 
   useEffect(() => {
-    if (authStatus !== "authenticated") {
-      setHasBusiness(false);
-      setHasPendingBusinessOnboarding(false);
-      return;
-    }
-
-    const businessState = getBusinessRegistrationStateFromProfile(profile || {});
-    setHasBusiness(Boolean(businessState.registered));
-    setHasPendingBusinessOnboarding(Boolean(businessState.pending));
+    if (authStatus !== "authenticated") return;
     syncBusinessRegistrationCookie(profile || {});
   }, [authStatus, profile]);
 
@@ -176,11 +178,7 @@ function DashboardHeaderContent({ showLogout = true }) {
                   onClick={handleModeSwitch}
                   className="mt-4 w-full rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 transition-colors hover:bg-indigo-100"
                 >
-                  {hasBusiness
-                    ? "Switch to Business Dashboard"
-                    : hasPendingBusinessOnboarding
-                      ? "Complete Registration"
-                      : "Business Register"}
+                  {businessCtaLabel}
                 </button>
               )}
               <button

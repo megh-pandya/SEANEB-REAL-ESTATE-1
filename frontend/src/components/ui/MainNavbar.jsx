@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import BrandLogo from "./BrandLogo";
 import TempUserAvatar from "./TempUserAvatar";
 import navbarLinks from "@/data/navbarLinks.json";
@@ -102,8 +102,6 @@ function MainNavbarContent() {
   const searchParams = useSearchParams();
   const isHomeRoute = pathname === "/" || pathname === "/home";
   const { status: authStatus, user: profile, logout } = useListingAuth();
-  const [hasBusiness, setHasBusiness] = useState(false);
-  const [hasPendingBusinessOnboarding, setHasPendingBusinessOnboarding] = useState(false);
   const [countryBadgeName, setCountryBadgeName] = useState("");
   const fallbackEmail = getCookie("verified_email") || getCookie("user_email") || "";
   const fallbackSeaNebId = getCookie("seaneb_id") || "";
@@ -125,6 +123,19 @@ function MainNavbarContent() {
   const profileUrl = getAuthAppUrl("/dashboard/broker");
   const canShowAuthenticated = hydrated && authStatus === "authenticated";
   const downloadSectionHref = "/home#download";
+  const businessState = useMemo(() => {
+    if (authStatus !== "authenticated") {
+      return { registered: false, pending: false };
+    }
+    return getBusinessRegistrationStateFromProfile(profile || {});
+  }, [authStatus, profile]);
+  const hasBusiness = Boolean(businessState.registered);
+  const hasPendingBusinessOnboarding = Boolean(businessState.pending);
+  const businessCtaLabel = hasBusiness
+    ? "Open Dashboard"
+    : hasPendingBusinessOnboarding
+      ? "Complete Registration"
+      : "Register Business";
 
   const handleGetAppClick = (event) => {
     if (pathname === "/" || pathname === "/home") {
@@ -190,15 +201,7 @@ function MainNavbarContent() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (authStatus !== "authenticated") {
-      setHasBusiness(false);
-      setHasPendingBusinessOnboarding(false);
-      return;
-    }
-
-    const businessState = getBusinessRegistrationStateFromProfile(profile || {});
-    setHasBusiness(Boolean(businessState.registered));
-    setHasPendingBusinessOnboarding(Boolean(businessState.pending));
+    if (authStatus !== "authenticated") return;
     syncBusinessRegistrationCookie(profile || {});
   }, [profile, authStatus]);
 
@@ -467,13 +470,7 @@ function MainNavbarContent() {
                           className="flex items-center gap-2 px-3 py-2.5 text-sm font-medium text-[#403125] transition hover:bg-[#f8f1e5]"
                         >
                           <span aria-hidden="true">{"\u25A6"}</span>
-                          <span>
-                            {hasBusiness
-                              ? "Open Dashboard"
-                              : hasPendingBusinessOnboarding
-                                ? "Complete Registration"
-                                : "Register Business"}
-                          </span>
+                          <span>{businessCtaLabel}</span>
                         </Link>
                         <div className="h-px bg-[#efe9df]" />
                         <button
